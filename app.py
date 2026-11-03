@@ -1,6 +1,7 @@
 import os
+import io
 import pandas as pd
-from flask import Flask, render_template, request, redirect, url_for
+from flask import Flask, render_template, request, redirect, url_for, Response
 from flask_sqlalchemy import SQLAlchemy
 from dotenv import load_dotenv
 from groq import Groq
@@ -15,6 +16,7 @@ app.config['UPLOAD_FOLDER'] = 'uploads'
 os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
 
 db = SQLAlchemy(app)
+
 # Inisialisasi Groq Client
 groq_client = Groq(
     api_key=os.getenv("GROQ_API_KEY"),
@@ -32,6 +34,7 @@ with app.app_context():
     db.create_all()
 
 # --- FUNGSI PIPELINE MULTI-AGENT ---
+
 def run_agentic_loop(review_text):
     # 1. Agen Classifier: Analisis Sentimen & Topik
     prompt_classifier = f"Analisis ulasan restoran ini: '{review_text}'. Tentukan Sentimen (Positif/Negatif) dan Topik Utama (Porsi, Rasa, Pelayanan, Harga). Balas HANYA dengan format pasti: Sentimen | Topik."
@@ -83,11 +86,38 @@ def run_agentic_loop(review_text):
 
     return sentimen.strip(), topik.strip(), draf_final.strip(), status_critic.strip()
 
+
+# 4. Agen Manager: Ringkasan Eksekutif Bisnis
+def run_manager_agent(reviews_list):
+    if not reviews_list:
+        return "Belum ada data ulasan untuk dirangkum."
+    
+    gabungan_ulasan = "\n".join([f"- {r.teks_asli} (Sentimen: {r.sentimen}, Topik: {r.topik})" for r in reviews_list])
+    prompt_manager = f"""Berperanlah sebagai Manager Operasional Bisnis F&B. Berdasarkan data ulasan pelanggan berikut:
+{gabungan_ulasan}
+
+Buat rangkuman eksekutif bisnis singkat (2-3 kalimat) yang menyoroti tren operasional utama, titik masalah, dan poin evaluasi cabang."""
+
+    try:
+        rangkuman = groq_client.chat.completions.create(
+            messages=[{"role": "user", "content": prompt_manager}],
+            model="qwen/qwen3.8-27b",
+            temperature=0.3,
+            max_tokens=200
+        ).choices[0].message.content
+        return rangkuman.strip()
+    except Exception:
+        return "Gagal menghasilkan rangkuman eksekutif."
+
+
+# --- ROUTES ---
+
 @app.route('/')
 def index():
-    # Mengambil semua data dari SQLite untuk ditampilkan
     reviews = Review.query.all()
-    return render_template('index.html', reviews=reviews)
+    insight_bisnis = run_manager_agent(reviews)
+    return render_template('index.html', reviews=reviews, insight_bisnis=insight_bisnis)
+
 
 @app.route('/upload', methods=['POST'])
 def upload_file():
@@ -102,7 +132,7 @@ def upload_file():
         df = pd.read_csv(filepath)
         
         # Batasi 3 baris pertama agar API gratis tidak rate limit saat demo
-        for index, row in df.head(3).iterrows():
+        for index, row in df.head(5).iterrows():
             ulasan_teks = str(row.get('ulasan', row.iloc[0])) 
             sentimen, topik, draf, status = run_agentic_loop(ulasan_teks)
             
@@ -125,9 +155,33 @@ def delete_review(id):
         db.session.delete(review_to_delete)
         db.session.commit()
         return redirect(url_for('index'))
-    except:
+    except Exception:
         return "Terjadi kesalahan saat menghapus data."
 
+
+@app.route('/download')
+def download_csv():
+    reviews = Review.query.all()
+    if not reviews:
+        return redirect(url_for('index'))
+        
+    output = io.StringIO()
+    df_export = pd.DataFrame([{
+        'Ulasan Asli': r.teks_asli,
+        'Sentimen': r.sentimen,
+        'Topik': r.topik,
+        'Draf Balasan': r.draf_balasan,
+        'Status Critic': r.status_revisi
+    } for r in reviews])
     
+    df_export.to_csv(output, index=False)
+    
+    return Response(
+        output.getvalue(),
+        mimetype="text/csv",
+        headers={"Content-disposition": "attachment; filename=insightbite_hasil_analisis.csv"}
+    )
+
+
 if __name__ == '__main__':
     app.run(debug=True)
