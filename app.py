@@ -10,8 +10,12 @@ load_dotenv()
 
 app = Flask(__name__)
 
-# Vercel HANYA mengizinkan penyimpanan file di folder /tmp
-app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:////tmp/insightbite.db'
+# Deteksi otomatis: Jika di Vercel gunakan /tmp, jika di Windows lokal gunakan folder proyek
+if os.environ.get("VERCEL"):
+    app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:////tmp/insightbite.db'
+else:
+    app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///insightbite.db'
+
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 
 db = SQLAlchemy(app)
