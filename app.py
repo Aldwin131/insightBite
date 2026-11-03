@@ -10,7 +10,7 @@ load_dotenv()
 
 app = Flask(__name__)
 
-# Deteksi otomatis: Jika di Vercel gunakan /tmp, jika di Windows lokal gunakan folder proyek
+# Detect Vercel Atau Bukan
 if os.environ.get("VERCEL"):
     app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:////tmp/insightbite.db'
 else:
@@ -31,7 +31,7 @@ class Review(db.Model):
     sentimen = db.Column(db.String(50))
     topik = db.Column(db.String(100))
     draf_balasan = db.Column(db.Text)
-    status_revisi = db.Column(db.String(100))
+    status_revisi = db.Column(db.Text)
 
 with app.app_context():
     db.create_all()
@@ -69,7 +69,7 @@ def run_agentic_loop(review_text):
             messages=[{"role": "user", "content": prompt_critic}],
             model="qwen/qwen3.8-27b",
             temperature=0.1,
-            max_tokens=30
+            max_tokens=120
         ).choices[0].message.content
 
         if "LULUS" in evaluasi.upper():
