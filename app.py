@@ -1,19 +1,18 @@
 import os
 import io
-import pandas as pd
+import csv
 from flask import Flask, render_template, request, redirect, url_for, Response
 from flask_sqlalchemy import SQLAlchemy
 from dotenv import load_dotenv
 from groq import Groq
-from werkzeug.utils import secure_filename
 
 load_dotenv()
 
 app = Flask(__name__)
-app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///insightbite.db'
+
+# Vercel HANYA mengizinkan penyimpanan file di folder /tmp
+app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:////tmp/insightbite.db'
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
-app.config['UPLOAD_FOLDER'] = 'uploads'
-os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
 
 db = SQLAlchemy(app)
 
@@ -34,9 +33,7 @@ with app.app_context():
     db.create_all()
 
 # --- FUNGSI PIPELINE MULTI-AGENT ---
-
 def run_agentic_loop(review_text):
-    # 1. Agen Classifier: Analisis Sentimen & Topik
     prompt_classifier = f"Analisis ulasan restoran ini: '{review_text}'. Tentukan Sentimen (Positif/Negatif) dan Topik Utama (Porsi, Rasa, Pelayanan, Harga). Balas HANYA dengan format pasti: Sentimen | Topik."
     try:
         response_classifier = groq_client.chat.completions.create(
@@ -54,9 +51,7 @@ def run_agentic_loop(review_text):
     draf_final = ""
     status_critic = "Disetujui otomatis"
 
-    # Loop Evaluasi Agen Critic & Responder
     while iterasi < maks_iterasi:
-        # 2. Agen Responder: Buat Draf
         prompt_responder = f"Buat 1 paragraf balasan untuk pelanggan restoran yang menulis: '{review_text}'. Sentimen: {sentimen.strip()}. Buat balasan yang sopan, empatik, tidak kaku. Jangan beri basa-basi di awal, langsung balasannya."
         draf_balasan = groq_client.chat.completions.create(
             messages=[{"role": "user", "content": prompt_responder}],
@@ -65,7 +60,6 @@ def run_agentic_loop(review_text):
             max_tokens=150
         ).choices[0].message.content
 
-        # 3. Agen Critic: Quality Control
         prompt_critic = f"Evaluasi draf balasan admin ini: '{draf_balasan}'. Apakah terkesan defensif, ngeyel, atau seperti robot? Jawab HANYA 'LULUS' jika bagus, atau 'TOLAK: [alasan singkat]' jika buruk."
         evaluasi = groq_client.chat.completions.create(
             messages=[{"role": "user", "content": prompt_critic}],
@@ -86,8 +80,6 @@ def run_agentic_loop(review_text):
 
     return sentimen.strip(), topik.strip(), draf_final.strip(), status_critic.strip()
 
-
-# 4. Agen Manager: Ringkasan Eksekutif Bisnis
 def run_manager_agent(reviews_list):
     if not reviews_list:
         return "Belum ada data ulasan untuk dirangkum."
@@ -97,7 +89,6 @@ def run_manager_agent(reviews_list):
 {gabungan_ulasan}
 
 Buat rangkuman eksekutif bisnis singkat (2-3 kalimat) yang menyoroti tren operasional utama, titik masalah, dan poin evaluasi cabang."""
-
     try:
         rangkuman = groq_client.chat.completions.create(
             messages=[{"role": "user", "content": prompt_manager}],
@@ -109,15 +100,12 @@ Buat rangkuman eksekutif bisnis singkat (2-3 kalimat) yang menyoroti tren operas
     except Exception:
         return "Gagal menghasilkan rangkuman eksekutif."
 
-
 # --- ROUTES ---
-
 @app.route('/')
 def index():
     reviews = Review.query.all()
     insight_bisnis = run_manager_agent(reviews)
     return render_template('index.html', reviews=reviews, insight_bisnis=insight_bisnis)
-
 
 @app.route('/upload', methods=['POST'])
 def upload_file():
@@ -126,27 +114,30 @@ def upload_file():
     file = request.files['file']
     
     if file and file.filename.endswith('.csv'):
-        filepath = os.path.join(app.config['UPLOAD_FOLDER'], secure_filename(file.filename))
-        file.save(filepath)
+        # Baca langsung dari memori untuk Vercel, tanpa simpan file fisik
+        stream = io.StringIO(file.stream.read().decode("UTF8"), newline=None)
+        csv_reader = csv.reader(stream)
+        next(csv_reader, None) # Lewati baris header CSV
         
-        df = pd.read_csv(filepath)
-        
-        # Batasi 3 baris pertama agar API gratis tidak rate limit saat demo
-        for index, row in df.head(5).iterrows():
-            ulasan_teks = str(row.get('ulasan', row.iloc[0])) 
-            sentimen, topik, draf, status = run_agentic_loop(ulasan_teks)
-            
-            new_review = Review(
-                teks_asli=ulasan_teks, sentimen=sentimen, 
-                topik=topik, draf_balasan=draf, status_revisi=status
-            )
-            db.session.add(new_review)
+        count = 0
+        for row in csv_reader:
+            if count >= 3: # Tetap batasi 3 baris
+                break
+            if row:
+                ulasan_teks = row[0] # Mengambil kolom pertama
+                sentimen, topik, draf, status = run_agentic_loop(ulasan_teks)
+                
+                new_review = Review(
+                    teks_asli=ulasan_teks, sentimen=sentimen, 
+                    topik=topik, draf_balasan=draf, status_revisi=status
+                )
+                db.session.add(new_review)
+                count += 1
         
         db.session.commit()
         return redirect(url_for('index'))
         
     return "Format file wajib .csv"
-
 
 @app.route('/delete/<int:id>', methods=['POST'])
 def delete_review(id):
@@ -158,7 +149,6 @@ def delete_review(id):
     except Exception:
         return "Terjadi kesalahan saat menghapus data."
 
-
 @app.route('/download')
 def download_csv():
     reviews = Review.query.all()
@@ -166,22 +156,17 @@ def download_csv():
         return redirect(url_for('index'))
         
     output = io.StringIO()
-    df_export = pd.DataFrame([{
-        'Ulasan Asli': r.teks_asli,
-        'Sentimen': r.sentimen,
-        'Topik': r.topik,
-        'Draf Balasan': r.draf_balasan,
-        'Status Critic': r.status_revisi
-    } for r in reviews])
+    writer = csv.writer(output)
+    writer.writerow(['Ulasan Asli', 'Sentimen', 'Topik', 'Draf Balasan', 'Status Critic'])
     
-    df_export.to_csv(output, index=False)
+    for r in reviews:
+        writer.writerow([r.teks_asli, r.sentimen, r.topik, r.draf_balasan, r.status_revisi])
     
     return Response(
         output.getvalue(),
         mimetype="text/csv",
         headers={"Content-disposition": "attachment; filename=insightbite_hasil_analisis.csv"}
     )
-
 
 if __name__ == '__main__':
     app.run(debug=True)
