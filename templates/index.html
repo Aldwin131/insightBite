@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>InsightBite - Dashboard AI</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+</head>
+<body class="bg-gray-900 text-gray-200 min-h-screen p-8" x-data="{ isLoading: false }">
+
+    <div class="max-w-5xl mx-auto">
+        <header class="mb-8 text-center">
+            <h1 class="text-4xl font-bold text-green-500 mb-2">InsightBite</h1>
+            <p class="text-gray-400">Multi-Agent AI untuk Manajemen Reputasi F&B</p>
+        </header>
+
+        <div class="bg-gray-800 p-6 rounded-lg shadow-lg border border-gray-700 mb-8">
+            <h2 class="text-xl font-semibold text-green-400 mb-4">Upload Dataset Ulasan (CSV)</h2>
+            <form action="/upload" method="POST" enctype="multipart/form-data" @submit="isLoading = true">
+                <input type="file" name="file" accept=".csv" required 
+                    class="block w-full text-sm text-gray-400 
+                           file:mr-4 file:py-2 file:px-4 
+                           file:rounded-md file:border-0 
+                           file:text-sm file:font-semibold 
+                           file:bg-gray-700 file:text-green-400 
+                           hover:file:bg-gray-600 mb-4 bg-gray-900 rounded p-2 border border-gray-700">
+                <button type="submit" class="bg-green-600 text-white px-5 py-2.5 rounded shadow hover:bg-green-700 transition font-medium">
+                    Proses dengan AI
+                </button>
+            </form>
+
+            <div x-show="isLoading" class="mt-4 text-green-400 font-medium animate-pulse flex items-center">
+                <svg class="animate-spin -ml-1 mr-3 h-5 w-5 text-green-500" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                    <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                    <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                </svg>
+                Agen AI sedang menganalisis dan berdebat... Mohon tunggu.
+            </div>
+        </div>
+
+        <div class="bg-gray-800 p-6 rounded-lg shadow-lg border border-gray-700">
+            <h2 class="text-xl font-semibold text-green-400 mb-4">Hasil Analisis & Draf Balasan</h2>
+            <div class="overflow-x-auto rounded border border-gray-700">
+                <table class="w-full text-left border-collapse">
+                    <thead>
+                        <tr class="bg-gray-900 text-gray-300">
+                            <th class="p-4 border-b border-gray-700 font-medium">Ulasan Asli</th>
+                            <th class="p-4 border-b border-gray-700 font-medium">Sentimen & Topik</th>
+                            <th class="p-4 border-b border-gray-700 font-medium">Draf Balasan (Tervalidasi)</th>
+                            <th class="p-4 border-b border-gray-700 font-medium">Status Agen Critic</th>
+                            <th class="p-4 border-b border-gray-700 font-medium">Aksi</th>
+                        </tr>
+                    </thead>
+                    <tbody class="text-gray-400">
+                        {% if reviews %}
+                            {% for review in reviews %}
+                            <tr class="hover:bg-gray-750 border-b border-gray-700">
+                                <td class="p-4 align-top">{{ review.teks_asli }}</td>
+                                <td class="p-4 align-top">
+                                    <span class="block text-white font-semibold">{{ review.sentimen }}</span>
+                                    <span class="text-sm text-green-500">{{ review.topik }}</span>
+                                </td>
+                                <td class="p-4 align-top text-gray-300">{{ review.draf_balasan }}</td>
+                                <td class="p-4 align-top">
+                                    {% if 'TOLAK' in review.status_revisi %}
+                                        <span class="text-red-400 text-sm font-medium">{{ review.status_revisi }}</span>
+                                    {% else %}
+                                        <span class="text-green-400 text-sm font-medium">{{ review.status_revisi }}</span>
+                                    {% endif %}
+                                </td>
+                                <td class="p-4 align-top">
+                                    <form action="/delete/{{ review.id }}" method="POST" onsubmit="return confirm('Yakin ingin menghapus draf ini?');">
+                                        <button type="submit" class="bg-red-600 text-white px-3 py-1.5 rounded shadow text-sm hover:bg-red-700 transition font-medium">
+                                            Hapus
+                                        </button>
+                                    </form>
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        {% else %}
+                            <tr>
+                                <td colspan="5" class="p-6 text-center text-gray-500 italic">Belum ada data. Silakan upload file CSV.</td>
+                            </tr>
+                        {% endif %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+</body>
+</html>
